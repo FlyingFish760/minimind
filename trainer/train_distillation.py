@@ -71,9 +71,9 @@ def train_epoch(epoch, loader, iters, teacher_model, lm_config_student, start_st
             ignore_index=0,
             reduction='none'
         )
-        ce_loss = torch.sum(ce_loss * loss_mask_flat) / loss_mask_flat.sum()
-        if lm_config_student.use_moe:
-            ce_loss += res.aux_loss
+        ce_loss_raw = torch.sum(ce_loss * loss_mask_flat) / loss_mask_flat.sum()
+        if lm_config_student.use_moe: ce_loss = ce_loss_raw + res.aux_loss
+        else: ce_loss = ce_loss_raw
 
         # 2) Distillation Loss
         if teacher_model is not None:
@@ -96,23 +96,25 @@ def train_epoch(epoch, loader, iters, teacher_model, lm_config_student, start_st
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
-            torch.cuda.empty_cache()
 
         if step % args.log_interval == 0 or step == iters - 1:
             spend_time = time.time() - start_time
             current_loss = loss.item() * args.accumulation_steps
+            current_ce_loss = ce_loss_raw.item()
+            current_aux_loss = res.aux_loss.item() if lm_config_student.use_moe else 0.0
             current_lr = optimizer.param_groups[-1]['lr']
             eta_min = spend_time / (step + 1) * iters // 60 - spend_time // 60
             
-            Logger(f'Epoch:[{epoch+1}/{args.epochs}]({step}/{iters}) loss:{current_loss:.6f} ce:{ce_loss.item():.4f} distill:{distill_loss.item():.4f} lr:{current_lr:.12f} epoch_Time:{eta_min}min:')
+            Logger(f'Epoch:[{epoch + 1}/{args.epochs}]({step}/{iters}), loss: {current_loss:.4f}, ce: {current_ce_loss:.4f}, aux_loss: {current_aux_loss:.4f}, distill: {distill_loss.item():.4f}, learning_rate: {current_lr:.8f}, epoch_time: {eta_min:.3f}min')
             
             if wandb:
                 wandb.log({
                     "loss": current_loss,
-                    "ce_loss": ce_loss.item(),
+                    "ce_loss": current_ce_loss,
+                    "aux_loss": current_aux_loss,
                     "distill_loss": distill_loss.item() if teacher_model is not None else 0.0,
-                    "lr": current_lr,
-                    "epoch_Time": eta_min
+                    "learning_rate": current_lr,
+                    "epoch_time": eta_min
                 })
 
         if (step % args.save_interval == 0 or step == iters - 1) and is_main_process():
@@ -123,10 +125,13 @@ def train_epoch(epoch, loader, iters, teacher_model, lm_config_student, start_st
                 state_dict = model.module.state_dict()
             else:
                 state_dict = model.state_dict()
-            state_dict = {k: v.half() for k, v in state_dict.items()}  # 半精度保存
+            state_dict = {k: v.half().cpu() for k, v in state_dict.items()}
             torch.save(state_dict, ckp)
             lm_checkpoint(lm_config_student, weight=args.save_weight, model=model, optimizer=optimizer, scaler=scaler, epoch=epoch, step=step, wandb=wandb, save_dir='../checkpoints')
             model.train()
+            del state_dict
+
+        del X, Y, loss_mask, res, student_logits, teacher_logits, ce_loss, distill_loss, loss
 
 
 if __name__ == "__main__":
@@ -138,12 +143,12 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=5e-6, help="初始学习率")
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu", help="训练设备")
     parser.add_argument("--dtype", type=str, default="bfloat16", help="混合精度类型")
-    parser.add_argument("--num_workers", type=int, default=1, help="数据加载线程数")
+    parser.add_argument("--num_workers", type=int, default=8, help="数据加载线程数")
     parser.add_argument("--accumulation_steps", type=int, default=1, help="梯度累积步数")
     parser.add_argument("--grad_clip", type=float, default=1.0, help="梯度裁剪阈值")
     parser.add_argument("--log_interval", type=int, default=100, help="日志打印间隔")
     parser.add_argument("--save_interval", type=int, default=100, help="模型保存间隔")
-    parser.add_argument("--max_seq_len", type=int, default=512, help="训练的最大截断长度")
+    parser.add_argument("--max_seq_len", type=int, default=340, help="训练的最大截断长度（中文1token≈1.5~1.7字符）")
     parser.add_argument("--data_path", type=str, default="../dataset/sft_mini_512.jsonl", help="训练数据路径")
     parser.add_argument('--student_hidden_size', default=512, type=int, help="学生模型隐藏层维度")
     parser.add_argument('--student_num_layers', default=8, type=int, help="学生模型隐藏层数量")
@@ -221,3 +226,6 @@ if __name__ == "__main__":
         else: # 默认从头开始
             loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=(train_sampler is None), sampler=train_sampler, num_workers=args.num_workers, pin_memory=True)
             train_epoch(epoch, loader, len(loader), teacher_model, lm_config_student, 0, wandb, args.alpha, args.temperature)
+    
+    # ========== 9. 清理分布进程 ==========
+    if dist.is_initialized(): dist.destroy_process_group()

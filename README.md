@@ -427,7 +427,7 @@ python train_xxx.py --use_wandb
 ## Ⅰ Tokenizer
 
 分词器将单词从自然语言通过“词典”映射到`0, 1, 36`这样的数字，可以理解为数字就代表了单词在“词典”中的页码。
-可以选择自己构造词表训练一个“词典”，代码可见`./scripts/train_tokenizer.py`（仅供学习参考，若非必要无需再自行训练，MiniMind已自带tokenizer）。
+可以选择自己构造词表训练一个“词典”，代码可见`./trainer/train_tokenizer.py`（仅供学习参考，若非必要无需再自行训练，MiniMind已自带tokenizer）。
 或者选择比较出名的开源大模型分词器，
 正如同直接用新华/牛津词典的优点是token编码压缩率很好，缺点是页数太多，动辄数十万个词汇短语；
 自己训练的分词器，优点是词表长度和内容随意控制，缺点是压缩率很低（例如"hello"也许会被拆分为"h e l l o"
@@ -565,7 +565,7 @@ MiniMind训练数据集下载地址： [ModelScope](https://www.modelscope.cn/da
 ├── lora_medical.jsonl (34MB)
 ├── pretrain_hq.jsonl (1.6GB, ✨)
 ├── r1_mix_1024.jsonl (340MB)
-├── rlaif-mini.jsonl (1MB)
+├── rlaif-mini.jsonl (1MB, ✨)
 ├── sft_1024.jsonl (5.6GB)
 ├── sft_2048.jsonl (9GB)
 ├── sft_512.jsonl (7.5GB)
@@ -578,13 +578,28 @@ MiniMind训练数据集下载地址： [ModelScope](https://www.modelscope.cn/da
 * `dpo.jsonl`✨ --RLHF阶段数据集（已精简优化，适合快速训练）
 * `lora_identity.jsonl` --自我认知数据集（例如：你是谁？我是minimind...），推荐用于lora训练（亦可用于全参SFT，勿被名字局限）
 * `lora_medical.jsonl` --医疗问答数据集，推荐用于lora训练（亦可用于全参SFT，勿被名字局限）
-* `pretrain_hq.jsonl`✨ --预训练数据集，整合自匠数科技
-* `r1_mix_1024.jsonl` --DeepSeek-R1-1.5B蒸馏数据，每条数据字符最大长度为1024（因此训练时设置max_seq_len=1024）
+* `pretrain_hq.jsonl`✨ --预训练数据集，整合自匠数科技（推荐设置`max_seq_len≈320`）
+* `r1_mix_1024.jsonl` --DeepSeek-R1-1.5B蒸馏数据，每条数据字符最大长度为1024（推荐设置`max_seq_len≈720`）
 * `rlaif-mini.jsonl` --RLAIF训练数据集，从SFT数据集中随机采样1万条高质量对话，用于PPO/GRPO/SPO等强化学习算法训练
-* `sft_1024.jsonl` --整合自Qwen2.5蒸馏数据（是sft_2048的子集），每条数据字符最大长度为1024（因此训练时设置max_seq_len=1024）
-* `sft_2048.jsonl` --整合自Qwen2.5蒸馏数据，每条数据字符最大长度为2048（因此训练时设置max_seq_len=2048）
-* `sft_512.jsonl` --整合自匠数科技SFT数据，每条数据字符最大长度为512（因此训练时设置max_seq_len=512）
-* `sft_mini_512.jsonl`✨ --极简整合自匠数科技SFT数据+Qwen2.5蒸馏数据（用于快速训练Zero模型），每条数据字符最大长度为512（因此训练时设置max_seq_len=512）
+* `sft_1024.jsonl` --整合自Qwen2.5蒸馏数据（是sft_2048的子集），每条数据字符最大长度为1024（推荐设置`max_seq_len≈650`）
+* `sft_2048.jsonl` --整合自Qwen2.5蒸馏数据，每条数据字符最大长度为2048（推荐设置`max_seq_len≈1400`）
+* `sft_512.jsonl` --整合自匠数科技SFT数据，每条数据字符最大长度为512（推荐设置`max_seq_len≈350`）
+* `sft_mini_512.jsonl`✨ --极简整合自匠数科技SFT数据+Qwen2.5蒸馏数据（用于快速训练Zero模型），每条数据字符最大长度为512（推荐设置`max_seq_len≈340`）
+
+
+训练参数`max_seq_len`目前指的是tokens长度，而非绝对字符数。
+本项目tokenizer在中文文本上大约`1.5~1.7 字符/token`，纯英文的压缩比在`4~5 字符/token`，不同数据分布会有波动。
+数据集命名标注的“最大长度”均为字符数，100长度的字符串可粗略换算成`100/1.5≈67`的tokens长度。
+
+例如：
+
+* 中文：`白日依山尽`5个字符可能被拆分为[`白日`,`依`,`山`,`尽`] 4个tokens；
+* 英文：`The sun sets in the west`24个字符可能被拆分为[`The `,`sun `,`sets `,`in `,`the`,`west`] 6个tokens
+
+“推荐设置”给出了各个数据集上最大tokens长度的粗略估计。
+须知max_seq_len可以激进/保守/均衡地调整，因为更大或更小均无法避免副作用：一些样本短于max_seq_len后被padding浪费算力，一些样本长于max_seq_len后被截断语意。
+
+在 `算力效率` <---> `语义完整性` 之间找到一个平衡点即可
 
 </details>
 
@@ -924,7 +939,7 @@ MiniMind2第一时间只能坚定不移的选择做蒸馏派，日后基于0.1B�
 这在GRPO中通过设置规则奖励函数约束模型符合思考标签和回复标签（在冷启动靠前的阶段奖励值设置应该提高一些）
 
 另一个问题是蒸馏过程虽然和SFT一样，但实验结果是模型难以每次都符合模板规范的回复，即脱离思考和回复标签约束。
-这里的小技巧是增加标记位置token的损失惩罚，详见`train_distill_reason.py`:
+这里的小技巧是增加标记位置token的损失惩罚，详见`train_reason.py`:
 
 ```text
 # 在 sp_ids 对应的位置增加额外的惩罚
@@ -938,9 +953,9 @@ loss_mask[sp_ids] = 10 # 惩罚系数
 脚本默认基于rlhf后的基模型做推理能力的蒸馏微调，下面直接启动训练即可：
 
 ```bash
-torchrun --nproc_per_node 1 train_distill_reason.py
+torchrun --nproc_per_node 1 train_reason.py
 # or
-python train_distill_reason.py
+python train_reason.py
 ```
 
 > 训练后的模型权重文件默认每隔`100步`保存为: `reason_*.pth`（*为模型具体dimension，每次保存时新文件会覆盖旧文件）
@@ -1211,7 +1226,7 @@ python train_ppo.py
 $$\mathcal{L}_{GRPO} = -\mathbb{E}\left[r_t \cdot A_t - \beta \cdot \text{KL}_t\right]$$
 
 其中：
-- **策略项**: $f(r_t) = r_t$ (直接使用概率比，无clip裁剪)
+- **策略项**: $f(r_t) = \min(r_t, \text{clip}(r_t))$ (使用概率比的clip裁剪)
 - **优势项**: $g(A_t) = \frac{R - \mu_{group}}{\sigma_{group}}$ (组内归一化，消除Critic网络)
 - **正则项**: $h(\text{KL}_t) = \beta \cdot \text{KL}_t$ (token级KL散度约束)
 
@@ -1294,7 +1309,7 @@ python train_spo.py
 |------|----------------|----------------|----------------------|----------|
 | **DPO** | $\log r_w - \log r_l$ | 隐式（偏好对比） | 隐含在 $\beta$ 中 | 2 | 
 | **PPO** | $\min(r, \text{clip}(r))$ | $R - V(s)$ | $\beta \cdot \mathbb{E}[\text{KL}]$ | 4 | 
-| **GRPO** | $r$ | $\frac{R - \mu}{\sigma}$ | $\beta \cdot \text{KL}_t$ | 2 |
+| **GRPO** | $\min(r, \text{clip}(r))$ | $\frac{R - \mu}{\sigma}$ | $\beta \cdot \text{KL}_t$ | 2 |
 | **SPO** | $\log \pi_\theta$ | $R - B_t^{adaptive}$ | $\beta \cdot \text{KL}_t$ | 2 | 
 
 **RL是优美且自洽的**
@@ -1580,13 +1595,28 @@ DPO和在线PPO的区别在于reject和chosen都是离线准备的，和minimind
 ## Ⅳ RoPE长度外推
 
 MiniMind支持通过YaRN算法进行RoPE位置编码的长度外推，使模型能够处理超出训练长度的文本序列。
-在使用`eval_llm.py`进行推理时，只需添加`--inference_rope_scaling`参数即可启用RoPE外推：
+
+原生torch模型在使用`eval_llm.py`进行推理时，只需添加`--inference_rope_scaling`参数即可启用RoPE外推：
 
 ```bash
 python eval_llm.py --weight full_sft --inference_rope_scaling
 ```
 
-下图展示了在不同文本「西游记」白话文小说长度下，使用RoPE scaling前后的困惑度(PPL)对比。可以看出，启用RoPE scaling后，模型在长文本上的表现显著提升：
+对于Transformers格式的模型，可以在config.json中添加以下配置实现长度外推：
+
+```json
+"rope_scaling": {
+    "type": "yarn",
+    "factor": 16.0,
+    "original_max_position_embeddings": 2048,
+    "beta_fast": 32.0,
+    "beta_slow": 1.0,
+    "attention_factor": 1.0
+}
+```
+
+在MiniMind-Small模型上，测试输入不同长度的「西游记」白话文小说，评估RoPE scaling前后的困惑度(PPL)对比。
+可以看出，启用YaRN外推后，模型在长文本上的PPL表现显著下降：
 
 <div align="center">
 <img src="./images/rope_ppl.png">
@@ -1635,13 +1665,13 @@ MiniMind模型本身预训练数据集小的可怜，也没有针对性的对测
 
 # 📌 Others
 
-## 模型转换
+## 🔧 模型转换
 
 * [./scripts/convert_model.py](./scripts/convert_model.py)可以实现`torch / transformers`模型的互相转换
 * 如无特别说明，`MiniMind2`模型均默认为`Transformers`格式的模型，需提前`t2t`转换！
 
 
-## 基于MiniMind-API服务接口
+## 🖥️ 基于MiniMind-API服务接口
 
 * [./scripts/serve_openai_api.py](./scripts/serve_openai_api.py)完成了兼容openai-api的最简聊天接口，方便将自己的模型接入第三方UI
   例如FastGPT、OpenWebUI、Dify等等。
@@ -1681,6 +1711,14 @@ MiniMind模型本身预训练数据集小的可怜，也没有针对性的对测
         "stream": true
     }'
     ```
+
+## 👨‍💻 更多
+
+* <a href="https://github.com/jingyaogong/minimind/discussions/618">🔗从MiniMind-LLM微调扩散语言模型</a>
+
+* <a href="https://github.com/jingyaogong/minimind/discussions/611">🔗模型的generate方法说明</a>
+
+---
 
 ## <img src="https://avatars.githubusercontent.com/u/136984999" height="28" style="vertical-align: middle;"/> [vllm](https://github.com/vllm-project/vllm)
 

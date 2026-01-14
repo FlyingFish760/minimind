@@ -426,7 +426,7 @@ By adding the `--use_wandb` parameter, you can record the training process. Afte
 ## Ⅰ Tokenizer
 
 Tokenizer maps words from natural language to numbers like `0, 1, 36` through a "dictionary," which can be understood as numbers representing the page number of the word in the "dictionary."
-You can choose to construct your own vocabulary table to train a "dictionary." The code can be found in `./scripts/train_tokenizer.py` (for learning reference only. It's not necessary to train one yourself unless required. MiniMind comes with a built-in tokenizer).
+You can choose to construct your own vocabulary table to train a "dictionary." The code can be found in `./trainer/train_tokenizer.py` (for learning reference only. It's not necessary to train one yourself unless required. MiniMind comes with a built-in tokenizer).
 Or you can choose tokenizers from well-known open-source large models.
 Just as using Xinhua/Oxford dictionaries directly has the advantage of good token encoding compression, but the disadvantage of having too many pages—tens of thousands of word phrases;
 A self-trained tokenizer has the advantage of freely controlling vocabulary length and content, but the disadvantage of low compression ratio (for example, "hello" might be split into "h e l l o"
@@ -564,7 +564,7 @@ Place the downloaded dataset files in the `./dataset/` directory (✨ are recomm
 ├── lora_medical.jsonl (34MB)
 ├── pretrain_hq.jsonl (1.6GB, ✨)
 ├── r1_mix_1024.jsonl (340MB)
-├── rlaif-mini.jsonl (1MB)
+├── rlaif-mini.jsonl (1MB, ✨)
 ├── sft_1024.jsonl (5.6GB)
 ├── sft_2048.jsonl (9GB)
 ├── sft_512.jsonl (7.5GB)
@@ -577,13 +577,28 @@ Place the downloaded dataset files in the `./dataset/` directory (✨ are recomm
 * `dpo.jsonl`✨ --RLHF stage dataset (optimized and simplified, suitable for fast training)
 * `lora_identity.jsonl` --Self-awareness dataset (e.g., Who are you? I am minimind...), recommended for lora training (can also be used for full-parameter SFT, don't be limited by the name)
 * `lora_medical.jsonl` --Medical Q&A dataset, recommended for lora training (can also be used for full-parameter SFT, don't be limited by the name)
-* `pretrain_hq.jsonl`✨ --Pretraining dataset, integrated from JiangShu Technology
-* `r1_mix_1024.jsonl` --DeepSeek-R1-1.5B distilled data, maximum character length per entry is 1024 (therefore set max_seq_len=1024 when training)
+* `pretrain_hq.jsonl`✨ --Pretraining dataset, integrated from JiangShu Technology (recommended `max_seq_len≈320`)
+* `r1_mix_1024.jsonl` --DeepSeek-R1-1.5B distilled data, maximum character length per entry is 1024 (recommended `max_seq_len≈720`)
 * `rlaif-mini.jsonl` --RLAIF training dataset, randomly sampled 10,000 high-quality conversations from SFT dataset for training reinforcement learning algorithms like PPO/GRPO/SPO
-* `sft_1024.jsonl` --Integrated from Qwen2.5 distilled data (a subset of sft_2048), maximum character length per entry is 1024 (therefore set max_seq_len=1024 when training)
-* `sft_2048.jsonl` --Integrated from Qwen2.5 distilled data, maximum character length per entry is 2048 (therefore set max_seq_len=2048 when training)
-* `sft_512.jsonl` --Integrated from JiangShu Technology SFT data, maximum character length per entry is 512 (therefore set max_seq_len=512 when training)
-* `sft_mini_512.jsonl`✨ --Minimal integration from JiangShu Technology SFT data + Qwen2.5 distilled data (for quick training of Zero models), maximum character length per entry is 512 (therefore set max_seq_len=512 when training)
+* `sft_1024.jsonl` --Integrated from Qwen2.5 distilled data (a subset of sft_2048), maximum character length per entry is 1024 (recommended `max_seq_len≈650`)
+* `sft_2048.jsonl` --Integrated from Qwen2.5 distilled data, maximum character length per entry is 2048 (recommended `max_seq_len≈1400`)
+* `sft_512.jsonl` --Integrated from JiangShu Technology SFT data, maximum character length per entry is 512 (recommended `max_seq_len≈350`)
+* `sft_mini_512.jsonl`✨ --Minimal integration from JiangShu Technology SFT data + Qwen2.5 distilled data (for quick training of Zero models), maximum character length per entry is 512 (recommended `max_seq_len≈340`)
+
+
+Training parameter `max_seq_len` currently refers to the **token length**, not the absolute number of characters.
+For this project's tokenizer, typical Chinese text is roughly `1.5~1.7 chars/token`, while pure English text is roughly `4~5 chars/token` (it varies with data distribution).
+The “max length” annotated in dataset names is measured in **characters**. For example, a 100-character Chinese string can be roughly converted to `100/1.5≈67` tokens.
+
+For example:
+
+* Chinese: `白日依山尽` (5 chars) may be tokenized into [`白日`, `依`, `山`, `尽`] (4 tokens)
+* English: `The sun sets in the west` (24 chars) may be tokenized into [`The `, `sun `, `sets `, `in `, `the`, `west`] (6 tokens)
+
+The “recommended setting” above provides a rough estimate of the max token length for each dataset.
+Note that `max_seq_len` can be tuned aggressively / conservatively / in a balanced way: a larger value increases padding waste, while a smaller value increases truncation.
+
+Just find a balance between `compute efficiency` <---> `semantic completeness`.
 
 </details>
 
@@ -913,7 +928,7 @@ The reply template for reasoning model R1 is:
 This is constrained by setting a rule-based reward function in GRPO to make the model comply with thinking tags and reply tags (in the early stages of cold starts, reward values should be increased).
 
 Another issue is that although the distillation process is the same as SFT, experimental results show that models have difficulty consistently complying with template-compliant replies every time, i.e., deviating from thinking and reply tag constraints.
-A small trick here is to increase the loss penalty for marker position tokens. See details in `train_distill_reason.py`:
+A small trick here is to increase the loss penalty for marker position tokens. See details in `train_reason.py`:
 
 ```text
 # Add extra penalty to positions corresponding to sp_ids
@@ -927,9 +942,9 @@ Therefore, `r1_mix_1024.jsonl` mixed approximately 10k multi-turn conversations 
 The script defaults to reasoning ability distillation fine-tuning based on the rlhf model. You can directly start training:
 
 ```bash
-torchrun --nproc_per_node 1 train_distill_reason.py
+torchrun --nproc_per_node 1 train_reason.py
 # or
-python train_distill_reason.py
+python train_reason.py
 ```
 
 > After training, model weight files are saved by default every `100 steps` as: `reason_*.pth` (where * is the model's specific dimension, new files overwrite old ones on each save)
@@ -1193,7 +1208,7 @@ In early 2025, DeepSeek-R1 became extremely popular, and equally popular was the
 $$\mathcal{L}_{GRPO} = -\mathbb{E}\left[r_t \cdot A_t - \beta \cdot \text{KL}_t\right]$$
 
 Where:
-- **Policy term**: $f(r_t) = r_t$ (directly use probability ratio, no clip clipping)
+- **Policy term**: $f(r_t) = \min(r_t, \text{clip}(r_t))$ (use probability ratio with clip clipping)
 - **Advantage term**: $g(A_t) = \frac{R - \mu_{group}}{\sigma_{group}}$ (within-group normalization, eliminate Critic network)
 - **Regularization term**: $h(\text{KL}_t) = \beta \cdot \text{KL}_t$ (token-level KL divergence constraint)
 
@@ -1271,7 +1286,7 @@ We return to the "**unified framework**", reorganizing the table showing all dif
 |-----------|----------------|----------------|----------------------|----------|
 | **DPO** | $\log r_w - \log r_l$ | Implicit (preference contrast) | Implicit in $\beta$ | 2 |
 | **PPO** | $\min(r, \text{clip}(r))$ | $R - V(s)$ | $\beta \cdot \mathbb{E}[\text{KL}]$ | 4 |
-| **GRPO** | $r$ | $\frac{R - \mu}{\sigma}$ | $\beta \cdot \text{KL}_t$ | 2 |
+| **GRPO** | $\min(r, \text{clip}(r))$ | $\frac{R - \mu}{\sigma}$ | $\beta \cdot \text{KL}_t$ | 2 |
 | **SPO** | $\log \pi_\theta$ | $R - B_t^{adaptive}$ | $\beta \cdot \text{KL}_t$ | 2 |
 
 **RL is Elegant and Self-Consistent**
@@ -1547,13 +1562,32 @@ Personal subjective evaluation basically aligns with DeepSeek-R1, where:
 ## Ⅳ RoPE Long-text Extrapolation
 
 MiniMind supports RoPE position encoding length extrapolation through YaRN algorithm, enabling models to handle text sequences exceeding training length.
-When using `eval_llm.py` for inference, just add `--inference_rope_scaling` parameter to enable RoPE extrapolation:
+
+For native torch models, when using `eval_llm.py` for inference, just add `--inference_rope_scaling` parameter to enable RoPE extrapolation:
 
 ```bash
 python eval_llm.py --weight full_sft --inference_rope_scaling
 ```
 
-The chart below shows perplexity (PPL) comparison before and after RoPE scaling on different lengths of "Journey to the West" vernacular fiction text. You can see that after enabling RoPE scaling, model performance on long texts is significantly improved.
+For Transformers format models, add the following configuration to config.json to enable length extrapolation:
+
+```json
+"rope_scaling": {
+    "type": "yarn",
+    "factor": 16.0,
+    "original_max_position_embeddings": 2048,
+    "beta_fast": 32.0,
+    "beta_slow": 1.0,
+    "attention_factor": 1.0
+}
+```
+
+Testing on MiniMind-Small model with different lengths of "Journey to the West" vernacular fiction text to evaluate perplexity (PPL) comparison before and after RoPE scaling.
+You can see that after enabling YaRN extrapolation, the model's PPL performance on long texts significantly decreases:
+
+<div align="center">
+<img src="./images/rope_ppl.png">
+</div>
 
 ## Ⅴ Objective Benchmarks
 
@@ -1565,14 +1599,14 @@ Models generally achieve baseline performance due to small parameter scales and 
 
 # 📌 Others
 
-## Model Conversion
+## 🔧 Model Conversion
 
 * [./scripts/convert_model.py](./scripts/convert_model.py) enables mutual conversion of `torch / transformers` models
 * Unless otherwise specified, `MiniMind2` models are by default in `Transformers` format and require `t2t` conversion beforehand!
 
 
 
-## OpenAI-API Based MiniMind Service Interface
+## 🖥️ OpenAI-API Based MiniMind Service Interface
 
 * [./scripts/serve_openai_api.py](./scripts/serve_openai_api.py) provides extremely simple OpenAI-API compatible chat interface, convenient for integration with third-party UIs like FastGPT, Open-WebUI, Dify, etc.
 
@@ -1611,6 +1645,13 @@ Models generally achieve baseline performance due to small parameter scales and 
         "stream": true
     }'
     ```
+
+## 👨‍💻 More
+
+* <a href="https://github.com/jingyaogong/minimind/discussions/618">🔗Fine-tuning Diffusion Language Models from MiniMind-LLM</a>
+* <a href="https://github.com/jingyaogong/minimind/discussions/611">🔗Model generate method explanation</a>
+
+---
 
 ## <img src="https://avatars.githubusercontent.com/u/136984999" height="28" style="vertical-align: middle;"/> [vllm](https://github.com/vllm-project/vllm)
 
