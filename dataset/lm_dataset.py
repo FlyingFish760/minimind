@@ -246,4 +246,7 @@ class RLAIFDataset(Dataset):
 
 
 if __name__ == "__main__":
-    pass
+    from transformers import AutoTokenizer
+    train_ds = PretrainDataset(r'E:\LLM\minimind\dataset\pretrain_hq.jsonl', 
+                               tokenizer = AutoTokenizer.from_pretrained(r"E:\LLM\minimind\MiniMind2"), 
+                               max_length=512)

@@ -1,4 +1,8 @@
-model/__pycache__
 out
 website/
 docs-minimind/
+dataset/*.jsonl
+.vscode/
+MiniMind2/
+__pycache__/
+personal access token.txt
